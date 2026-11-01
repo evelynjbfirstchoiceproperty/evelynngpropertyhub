@@ -5349,13 +5349,8 @@ document.addEventListener('click', function(event) {
   if (window.__ephStoryAutoNextV4Installed) return;
   window.__ephStoryAutoNextV4Installed = true;
 
-  // Keep the user's sound choice across Story changes and page re-entry.
-  try {
-    var savedStorySound = localStorage.getItem('ephStoryMuted');
-    window.ephStoryMuted = savedStorySound === null ? true : savedStorySound === '1';
-  } catch (e) {
-    window.ephStoryMuted = true;
-  }
+  // Autoplay is muted by default because modern browsers block most audible autoplay.
+  window.ephStoryMuted = true;
   var driveTimer = null;
   var currentStoryKey = '';
   var youtubePlayer = null;
@@ -5426,7 +5421,6 @@ document.addEventListener('click', function(event) {
     try { if(youtubePlayer&&youtubePlayer.pauseVideo) youtubePlayer.pauseVideo(); } catch(e) {}
     try { if(vimeoPlayer&&vimeoPlayer.pause) vimeoPlayer.pause(); } catch(e) {}
     youtubePlayer=null; vimeoPlayer=null; currentProvider='';
-    window.__ephStoryYouTubePlayer=null;window.__ephStoryVimeoPlayer=null;
   }
   function safeAdvance(key){
     if (autoNextLock || key!==currentStoryKey) return;
@@ -5477,37 +5471,26 @@ document.addEventListener('click', function(event) {
   }
   function setSound(muted){
     window.ephStoryMuted=!!muted;
-    try { localStorage.setItem('ephStoryMuted', window.ephStoryMuted ? '1' : '0'); } catch (e) {}
     var host=document.getElementById('ephPublicStoryPlayer');
     if(host){
-      host.querySelectorAll('video').forEach(function(video){
-        video.defaultMuted=window.ephStoryMuted;
-        video.muted=window.ephStoryMuted;
-        if(!window.ephStoryMuted){var p=video.play();if(p&&p.catch)p.catch(function(){});}
-      });
+      var video=host.querySelector('video');
+      if(video){video.muted=window.ephStoryMuted;if(!window.ephStoryMuted){var p=video.play();if(p&&p.catch)p.catch(function(){});}}
     }
-    var yt=window.__ephStoryYouTubePlayer||youtubePlayer;
-    try { if(yt){if(window.ephStoryMuted&&yt.mute)yt.mute();else if(!window.ephStoryMuted&&yt.unMute)yt.unMute();} } catch(e) {}
-    var vm=window.__ephStoryVimeoPlayer||vimeoPlayer;
-    try { if(vm&&vm.setMuted){var vp=vm.setMuted(window.ephStoryMuted);if(vp&&vp.catch)vp.catch(function(){});} } catch(e) {}
-    var frame=host&&host.querySelector('iframe');
-    if(frame){try{var fu=new URL(frame.src);if(/youtube-nocookie\.com|youtube\.com/.test(fu.hostname)){frame.contentWindow.postMessage(JSON.stringify({event:'command',func:window.ephStoryMuted?'mute':'unMute',args:[]}), '*');}else if(/player\.vimeo\.com/.test(fu.hostname)){frame.contentWindow.postMessage(JSON.stringify({method:'setMuted',value:window.ephStoryMuted}), '*');frame.contentWindow.postMessage(JSON.stringify({method:'setVolume',value:window.ephStoryMuted?0:1}), '*');}}catch(e){}}
-    var label=window.ephStoryMuted?'🔇 Story 全部静音中 · 点击开启声音':'🔊 Story 声音已开启 · 点击全部静音';
-    var drivePreview=!!(host&&host.querySelector('iframe.eph-drive-video-preview'));
-    var btn=document.getElementById('eph-story-global-sound');
-    if(btn){btn.textContent=label+(drivePreview?'（Drive 预览请用播放器内喇叭）':'');btn.title=drivePreview?'Google Drive Preview 受跨域限制，外部按钮不能改变它的音量。':'一键切换当前及后续 Story 的声音。';}
-    var inline=host&&host.querySelector('[data-eph-story-sound]');if(inline)inline.textContent=window.ephStoryMuted?'🔇 Sound Off':'🔊 Sound On';
+    try { if(youtubePlayer){if(window.ephStoryMuted&&youtubePlayer.mute)youtubePlayer.mute();else if(!window.ephStoryMuted&&youtubePlayer.unMute)youtubePlayer.unMute();} } catch(e) {}
+    try { if(vimeoPlayer&&vimeoPlayer.setMuted)vimeoPlayer.setMuted(window.ephStoryMuted); } catch(e) {}
+    var btn=host&&host.querySelector('[data-eph-story-sound]');
+    if(btn)btn.textContent=window.ephStoryMuted?'🔇 Sound Off':'🔊 Sound On';
   }
   window.ephSetPublicStorySound=setSound;
   function buildYouTubeUrl(embed){
     var u=new URL(embed);
-    u.searchParams.set('autoplay','1');u.searchParams.set('mute',window.ephStoryMuted?'1':'0');u.searchParams.set('playsinline','1');u.searchParams.set('enablejsapi','1');u.searchParams.set('controls','1');
+    u.searchParams.set('autoplay','1');u.searchParams.set('mute','1');u.searchParams.set('playsinline','1');u.searchParams.set('enablejsapi','1');u.searchParams.set('controls','1');
     if(location.origin&&location.origin!=='null')u.searchParams.set('origin',location.origin);
     return u.toString();
   }
   function buildVimeoUrl(embed){
     var u=new URL(embed);
-    u.searchParams.set('autoplay','1');u.searchParams.set('muted',window.ephStoryMuted?'1':'0');u.searchParams.set('playsinline','1');u.searchParams.set('autopause','0');u.searchParams.set('loop','0');
+    u.searchParams.set('autoplay','1');u.searchParams.set('muted','1');u.searchParams.set('playsinline','1');u.searchParams.set('autopause','0');u.searchParams.set('loop','0');
     return u.toString();
   }
   function bindDriveTimer(frame,row,key,host){
@@ -5527,13 +5510,10 @@ document.addEventListener('click', function(event) {
     var video=host.querySelector('video');
     if(video){
       currentProvider='native';
-      video.muted=!!window.ephStoryMuted;video.defaultMuted=!!window.ephStoryMuted;video.autoplay=true;video.playsInline=true;video.preload='auto';
+      video.muted=true;video.defaultMuted=true;video.autoplay=true;video.playsInline=true;video.preload='auto';
       if(video.dataset.ephAutoNextV4!=='1'){
         video.dataset.ephAutoNextV4='1';
         video.addEventListener('ended',function(){safeAdvance(key);},{once:true});
-      }
-      if(video.dataset.ephDriveFileId){
-        watchDriveNative(video,row,key,host);
       }
       var p=video.play();
       if(p&&typeof p.catch==='function')p.catch(function(){addAutoplayHint(host,'Browser blocked automatic playback. Tap Play on the video; the next Story will start automatically when it ends.');});
@@ -5561,7 +5541,7 @@ document.addEventListener('click', function(event) {
         if(!frame.id)frame.id='ephStoryYouTubePlayerV4';
         youtubePlayer=new YT.Player(frame.id,{
           events:{
-            onReady:function(e){try{window.__ephStoryYouTubePlayer=e.target;if(window.ephStoryMuted)e.target.mute();else e.target.unMute();e.target.playVideo();}catch(err){}},
+            onReady:function(e){try{e.target.mute();e.target.playVideo();}catch(err){}},
             onStateChange:function(e){if(e.data===0)safeAdvance(key);},
             onAutoplayBlocked:function(){addAutoplayHint(host,'Browser blocked autoplay. Tap Play in the YouTube player; auto-next remains enabled.');}
           }
@@ -5575,73 +5555,11 @@ document.addEventListener('click', function(event) {
         if(key!==currentStoryKey||!frame.isConnected)return;
         if(frame.dataset.ephVimeoBoundV4==='1')return;
         frame.dataset.ephVimeoBoundV4='1';
-        vimeoPlayer=new Vimeo.Player(frame);window.__ephStoryVimeoPlayer=vimeoPlayer;
+        vimeoPlayer=new Vimeo.Player(frame);
         vimeoPlayer.on('ended',function(){safeAdvance(key);});
-        return Promise.all([vimeoPlayer.setMuted(!!window.ephStoryMuted).catch(function(){}),vimeoPlayer.setAutopause(false).catch(function(){})]).then(function(){return vimeoPlayer.play().catch(function(){addAutoplayHint(host,'Browser blocked Vimeo autoplay. Tap Play in the player; auto-next remains enabled.');});});
+        return Promise.all([vimeoPlayer.setMuted(true).catch(function(){}),vimeoPlayer.setAutopause(false).catch(function(){})]).then(function(){return vimeoPlayer.play().catch(function(){addAutoplayHint(host,'Browser blocked Vimeo autoplay. Tap Play in the player; auto-next remains enabled.');});});
       }).catch(function(){addAutoplayHint(host,'Vimeo auto-next could not connect to its player API. Use Next manually.');});
     }
-  }
-  function ensureGlobalSoundButton(host){
-    if(!host||!host.parentNode)return;
-    var parent=host.parentNode,btn=document.getElementById('eph-story-global-sound');
-    if(!btn){
-      btn=document.createElement('button');btn.type='button';btn.id='eph-story-global-sound';btn.className='btn gold small';
-      btn.style.cssText='display:inline-flex;align-items:center;justify-content:center;margin:0 0 10px 0;min-height:42px;padding:9px 14px;font-weight:800;';
-    }
-    if(btn.parentNode!==parent||btn.nextElementSibling!==host)parent.insertBefore(btn,host);
-    var drivePreview=!!host.querySelector('iframe.eph-drive-video-preview');
-    btn.textContent=(window.ephStoryMuted?'🔇 Story sound off · tap to enable':'🔊 Story sound on · tap to mute')+(drivePreview?' · Drive volume inside player':'');
-    btn.title=drivePreview?'Google Drive Preview is cross-origin. Use the speaker control inside the video for this Story.':'Toggle sound for Story videos.';
-  }
-  function driveDirectUrl(row,id){
-    var d=dataObject(row);
-    var raw=videoUrl(row);
-    var candidate=row.webContentLink||row.download_url||row.downloadUrl||d.webContentLink||d.download_url||d.downloadUrl||(/drive\.google\.com\/uc\?/i.test(raw)?raw:'');
-    if(candidate&&/^https:\/\//i.test(String(candidate))&&!/\/file\/d\//i.test(String(candidate)))return String(candidate);
-    // Use the public Drive file content URL in a native video element first.
-    // If Google returns an interstitial instead of media, the player falls back to Drive Preview.
-    return 'https://drive.google.com/uc?export=download&id='+encodeURIComponent(id);
-  }
-  function fallbackDrivePreview(video,row,key,host){
-    if(!video||!video.isConnected||key!==currentStoryKey||video.dataset.ephDriveFallbackDone==='1')return;
-    video.dataset.ephDriveFallbackDone='1';
-    if(video.__ephDriveTryTimer){clearTimeout(video.__ephDriveTryTimer);video.__ephDriveTryTimer=null;}
-    var id=video.dataset.ephDriveFileId;if(!id)return;
-    var frame=document.createElement('iframe');frame.className='eph-drive-video-preview';frame.dataset.ephProvider='drive';
-    frame.title=String(row.title||row.name||'Property Video');
-    frame.allow='autoplay; encrypted-media; picture-in-picture; fullscreen';frame.allowFullscreen=true;
-    frame.loading='eager';frame.referrerPolicy='strict-origin-when-cross-origin';
-    frame.src='https://drive.google.com/file/d/'+encodeURIComponent(id)+'/preview?autoplay=1&mute='+(window.ephStoryMuted?'1':'0');
-    video.replaceWith(frame);currentProvider='drive';
-    addAutoplayHint(host,'這個 Drive 檔案未能提供原生影片串流，已退回 Google Drive Preview。Preview 的聲音只能使用影片內的喇叭控制；外部一鍵按鈕無法跨域控制。');
-    var btn=document.getElementById('eph-story-global-sound');if(btn){btn.textContent=(window.ephStoryMuted?'🔇 Story 全部靜音中':'🔊 Story 聲音已開啟')+'（此 Drive Preview 需用內部喇叭）';btn.title='Drive Preview 不提供外部網頁音量控制。';}
-    bindDriveTimer(frame,row,key,host);
-  }
-  function watchDriveNative(video,row,key,host){
-    if(!video||!video.isConnected||key!==currentStoryKey)return;
-    if(video.readyState>=1){video.dataset.ephDriveReadyV6='1';video.muted=!!window.ephStoryMuted;return;}
-    if(video.__ephDriveTryTimer)clearTimeout(video.__ephDriveTryTimer);
-    var settled=false;
-    function ready(){if(settled)return;settled=true;video.dataset.ephDriveReadyV6='1';if(video.__ephDriveTryTimer)clearTimeout(video.__ephDriveTryTimer);video.muted=!!window.ephStoryMuted;video.defaultMuted=!!window.ephStoryMuted;}
-    function failed(){if(settled)return;settled=true;if(video.__ephDriveTryTimer)clearTimeout(video.__ephDriveTryTimer);retryDriveNative(video,row,key,host);}
-    video.addEventListener('loadedmetadata',ready,{once:true});
-    video.addEventListener('error',failed,{once:true});
-    video.__ephDriveTryTimer=setTimeout(function(){if(!settled&&video.isConnected&&video.readyState<1)failed();},12000);
-  }
-  function retryDriveNative(video,row,key,host){
-    if(!video||!video.isConnected||key!==currentStoryKey)return;
-    var attempt=Number(video.dataset.ephDriveAttemptV6||0);
-    if(attempt<1){
-      var id=video.dataset.ephDriveFileId;if(!id){fallbackDrivePreview(video,row,key,host);return;}
-      video.dataset.ephDriveAttemptV6='1';
-      var alternate='https://drive.usercontent.google.com/download?id='+encodeURIComponent(id)+'&export=download&confirm=t';
-      video.pause();video.src=alternate;video.load();
-      video.muted=!!window.ephStoryMuted;video.defaultMuted=!!window.ephStoryMuted;
-      watchDriveNative(video,row,key,host);
-      var play=video.play();if(play&&play.catch)play.catch(function(){});
-      return;
-    }
-    fallbackDrivePreview(video,row,key,host);
   }
   function renderCurrentStory(){
     stopCurrentPlayer();
@@ -5654,13 +5572,13 @@ document.addEventListener('click', function(event) {
     var driveId=driveFileId(row),embed=raw&&typeof window.ephEmbedUrl==='function'?window.ephEmbedUrl(raw):raw;
     var media='';
     if(driveId){
-      var direct=driveDirectUrl(row,driveId);
-      media='<video data-eph-drive-file-id="'+escapeHtml(driveId)+'" src="'+escapeHtml(direct)+'" controls autoplay '+(window.ephStoryMuted?'muted':'')+' playsinline preload="metadata"></video>';
+      var preview='https://drive.google.com/file/d/'+encodeURIComponent(driveId)+'/preview?autoplay=1&mute=1';
+      media='<iframe class="eph-drive-video-preview" data-eph-provider="drive" src="'+escapeHtml(preview)+'" title="'+escapeHtml(title)+'" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="eager" referrerpolicy="strict-origin-when-cross-origin"></iframe>';
     }else if(embed&&/youtube-nocookie\.com\/embed|player\.vimeo\.com\/video/i.test(embed)){
       var providerUrl=/youtube-nocookie\.com|youtube\.com/i.test(embed)?buildYouTubeUrl(embed):buildVimeoUrl(embed);
       media='<iframe src="'+escapeHtml(providerUrl)+'" title="'+escapeHtml(title)+'" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="eager"></iframe>';
     }else if(raw&&(/\.(mp4|m4v|mov|webm|ogv|ogg)(\?|#|$)/i.test(raw)||String(row.media_type||row.type||'').toLowerCase().indexOf('video')>=0)){
-      media='<video src="'+escapeHtml(raw)+'" controls autoplay '+(window.ephStoryMuted?'muted':'')+' playsinline preload="auto"></video>';
+      media='<video src="'+escapeHtml(raw)+'" controls autoplay muted playsinline preload="auto"></video>';
     }else if(raw){
       media='<div class="eph-video-link"><span>▶</span><a href="'+escapeHtml(raw)+'" target="_blank" rel="noopener">Open video ↗</a></div>';
     }else{
@@ -5668,11 +5586,11 @@ document.addEventListener('click', function(event) {
     }
     var key=String(row.id||row.drive_file_id||row.driveFileId||raw||('story-'+index));
     currentStoryKey=key;
-    host.innerHTML='<div class="eph-story-frame">'+media+'</div><div class="eph-story-controls"><button class="btn small" type="button" data-eph-story-prev '+(items.length<2?'disabled':'')+'>← Previous</button><span>'+escapeHtml((index+1)+' / '+items.length+' · '+title)+'</span><button class="btn small" type="button" data-eph-story-next '+(items.length<2?'disabled':'')+'>Next →</button></div>';
-    ensureGlobalSoundButton(host);
-    var prev=host.querySelector('[data-eph-story-prev]'),next=host.querySelector('[data-eph-story-next]');
+    host.innerHTML='<div class="eph-story-frame">'+media+'</div><div class="eph-story-controls"><button class="btn small" type="button" data-eph-story-prev '+(items.length<2?'disabled':'')+'>← Previous</button><span>'+escapeHtml((index+1)+' / '+items.length+' · '+title)+'</span><button class="btn small" type="button" data-eph-story-next '+(items.length<2?'disabled':'')+'>Next →</button><button class="btn small" type="button" data-eph-story-sound="1">🔇 Sound Off</button></div>';
+    var prev=host.querySelector('[data-eph-story-prev]'),next=host.querySelector('[data-eph-story-next]'),sound=host.querySelector('[data-eph-story-sound]');
     if(prev)prev.addEventListener('click',function(){window.ephMovePublicStory(-1);});
     if(next)next.addEventListener('click',function(){window.ephMovePublicStory(1);});
+    if(sound)sound.addEventListener('click',function(){setSound(!window.ephStoryMuted);});
     setTimeout(function(){bindPlayer(row,key);},180);
   }
   window.ephPublicStoryMarkup=renderCurrentStory;
@@ -5749,8 +5667,6 @@ document.addEventListener('click', function(event) {
 .eph-public-card .eph-photo-strip{contain:layout paint;}
 .eph-public-card .eph-photo-strip img{display:block;width:100%;height:54px;object-fit:cover;}
 .eph-story-frame video,.eph-story-frame iframe{display:block;width:100%;height:100%;}
-#eph-story-global-sound{position:relative;z-index:2;font-weight:700;}
-.eph-story-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 </style>
 <script id="eph-customer-photo-visible-priority-story-muted-autoplay-20261101">
 (function(){
@@ -5876,8 +5792,8 @@ document.addEventListener('click', function(event) {
   window.addEventListener('pageshow',function(){setTimeout(scanCards,150);});
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',scanCards,{once:true});else setTimeout(scanCards,0);
 
-  // Keep the sound choice selected by the persistent Story sound button.
-  if(typeof window.ephStoryMuted!=='boolean')window.ephStoryMuted=true;
+  // Reliable browser autoplay requires muted playback first. Customers can tap Sound On.
+  window.ephStoryMuted=true;
   var storyObserver=null;
   function storyHost(){return document.getElementById('ephPublicStoryPlayer');}
   function visibleEnough(el){
@@ -5892,10 +5808,10 @@ document.addEventListener('click', function(event) {
     try{
       var u=new URL(frame.src,location.href);
       if(/youtube-nocookie\.com|youtube\.com/.test(u.hostname)){
-        u.searchParams.set('autoplay','1');u.searchParams.set('mute',window.ephStoryMuted?'1':'0');u.searchParams.set('playsinline','1');u.searchParams.set('enablejsapi','1');
+        u.searchParams.set('autoplay','1');u.searchParams.set('mute','1');u.searchParams.set('playsinline','1');u.searchParams.set('enablejsapi','1');
         if(location.origin&&location.origin!=='null')u.searchParams.set('origin',location.origin);
       }else if(/player\.vimeo\.com/.test(u.hostname)){
-        u.searchParams.set('autoplay','1');u.searchParams.set('muted',window.ephStoryMuted?'1':'0');u.searchParams.set('playsinline','1');u.searchParams.set('autopause','0');
+        u.searchParams.set('autoplay','1');u.searchParams.set('muted','1');u.searchParams.set('playsinline','1');u.searchParams.set('autopause','0');
       }
       var next=u.toString();
       if(frame.src!==next)frame.src=next;
@@ -5906,7 +5822,7 @@ document.addEventListener('click', function(event) {
     var host=storyHost();if(!visibleEnough(host))return;
     var media=host.querySelector('video');
     if(media){
-      media.muted=!!window.ephStoryMuted;media.defaultMuted=!!window.ephStoryMuted;media.autoplay=true;media.playsInline=true;media.preload='auto';
+      media.muted=true;media.defaultMuted=true;media.autoplay=true;media.playsInline=true;media.preload='auto';
       if(media.dataset.ephEndedAdvance!=='1'){
         media.dataset.ephEndedAdvance='1';
         media.addEventListener('ended',function(){if(typeof window.ephMovePublicStory==='function')window.ephMovePublicStory(1);},{once:true});
@@ -5918,8 +5834,8 @@ document.addEventListener('click', function(event) {
     if(frame){
       prepareIframe(frame);
       try{
-        if(/youtube-nocookie\.com|youtube\.com/.test(frame.src))frame.contentWindow.postMessage(JSON.stringify({event:'command',func:window.ephStoryMuted?'mute':'unMute',args:[]}),'*');
-        else if(/player\.vimeo\.com/.test(frame.src)){frame.contentWindow.postMessage(JSON.stringify({method:'setVolume',value:window.ephStoryMuted?0:1}),'*');frame.contentWindow.postMessage(JSON.stringify({method:'play'}),'*');}
+        if(/youtube-nocookie\.com|youtube\.com/.test(frame.src))frame.contentWindow.postMessage(JSON.stringify({event:'command',func:'mute',args:[]}),'*');
+        else if(/player\.vimeo\.com/.test(frame.src)){frame.contentWindow.postMessage(JSON.stringify({method:'setVolume',value:0}),'*');frame.contentWindow.postMessage(JSON.stringify({method:'play'}),'*');}
       }catch(e){}
     }
   }
@@ -5935,11 +5851,12 @@ document.addEventListener('click', function(event) {
   var baseStoryMarkup=window.ephPublicStoryMarkup;
   if(typeof baseStoryMarkup==='function'&&!baseStoryMarkup.__ephMutedAutoplayFinal){
     var storyWrapped=function(){
+      window.ephStoryMuted=true;
       var result=baseStoryMarkup.apply(this,arguments);
       var host=storyHost();
       if(host){
         var frame=host.querySelector('iframe');if(frame)prepareIframe(frame);
-        var media=host.querySelector('video');if(media){media.muted=!!window.ephStoryMuted;media.defaultMuted=!!window.ephStoryMuted;media.autoplay=true;media.playsInline=true;media.preload='auto';}
+        var media=host.querySelector('video');if(media){media.muted=true;media.defaultMuted=true;media.autoplay=true;media.playsInline=true;media.preload='auto';}
         var sound=host.querySelector('[data-eph-story-sound]');if(sound)sound.textContent='🔇 Sound Off · tap to enable';
         setTimeout(observeStory,80);
       }
@@ -6053,85 +5970,3 @@ document.addEventListener('click', function(event) {
  window.ephHydrateAgreementReminderFilesV2=hydrate;
 })();
 </script>
-
-<script id="eph-story-global-mute-final-guard-v6">
-(function(){
-  'use strict';
-  if(window.__ephStoryGlobalMuteFinalV6)return;
-  window.__ephStoryGlobalMuteFinalV6=true;
-  try{
-    var saved=localStorage.getItem('ephStoryMuted');
-    if(typeof window.ephStoryMuted!=='boolean')window.ephStoryMuted=saved===null?true:saved==='1';
-  }catch(e){if(typeof window.ephStoryMuted!=='boolean')window.ephStoryMuted=true;}
-
-  function host(){return document.getElementById('ephPublicStoryPlayer');}
-  function label(){
-    var h=host(),b=document.getElementById('eph-story-global-sound');if(!b)return;
-    var muted=!!window.ephStoryMuted,drive=!!(h&&h.querySelector('iframe.eph-drive-video-preview'));
-    var nextText=(muted?'🔇 Story 全部静音中 · 点击开启声音':'🔊 Story 声音已开启 · 点击全部静音')+(drive?'（Drive Preview 请用播放器内喇叭）':'');
-    if(b.textContent!==nextText)b.textContent=nextText;
-    if(b.getAttribute('aria-pressed')!==(muted?'true':'false'))b.setAttribute('aria-pressed',muted?'true':'false');
-    var nextTitle=drive?'Google Drive Preview 无法由外部网页按钮控制音量。':'一次切换当前影片及后续 Story 的声音。';
-    if(b.title!==nextTitle)b.title=nextTitle;
-  }
-  function apply(){
-    var h=host();if(!h)return;
-    var muted=!!window.ephStoryMuted;
-    h.querySelectorAll('video').forEach(function(v){
-      v.defaultMuted=muted;v.muted=muted;
-      if(!muted&&v.paused){var p=v.play();if(p&&p.catch)p.catch(function(){});}
-      if(v.dataset.ephMuteApplyV6!=='1'){
-        v.dataset.ephMuteApplyV6='1';
-        ['loadedmetadata','loadeddata','canplay','play'].forEach(function(ev){v.addEventListener(ev,function(){v.defaultMuted=!!window.ephStoryMuted;v.muted=!!window.ephStoryMuted;},{passive:true});});
-      }
-    });
-    var yt=window.__ephStoryYouTubePlayer;
-    try{if(yt){if(muted&&yt.mute)yt.mute();if(!muted&&yt.unMute)yt.unMute();}}catch(e){}
-    var vm=window.__ephStoryVimeoPlayer;
-    try{if(vm&&vm.setMuted){var q=vm.setMuted(muted);if(q&&q.catch)q.catch(function(){});}}catch(e){}
-    var frame=h.querySelector('iframe');
-    if(frame){
-      try{
-        var u=new URL(frame.src,location.href);
-        if(/youtube-nocookie\.com|youtube\.com/.test(u.hostname)&&!yt){frame.contentWindow.postMessage(JSON.stringify({event:'command',func:muted?'mute':'unMute',args:[]}), '*');}
-        else if(/player\.vimeo\.com/.test(u.hostname)&&!vm){frame.contentWindow.postMessage(JSON.stringify({method:'setMuted',value:muted}), '*');frame.contentWindow.postMessage(JSON.stringify({method:'setVolume',value:muted?0:1}), '*');}
-      }catch(e){}
-    }
-    label();
-  }
-  window.ephApplyStoryGlobalMuteV6=apply;
-  var originalSet=window.ephSetPublicStorySound;
-  window.ephSetPublicStorySound=function(muted){
-    window.ephStoryMuted=!!muted;
-    try{localStorage.setItem('ephStoryMuted',window.ephStoryMuted?'1':'0');}catch(e){}
-    try{if(typeof originalSet==='function')originalSet.call(this,window.ephStoryMuted);}catch(e){}
-    apply();
-    requestAnimationFrame(apply);setTimeout(apply,180);setTimeout(apply,700);
-  };
-
-  function ensureButton(){
-    var h=host();if(!h||!h.parentNode)return;
-    var b=document.getElementById('eph-story-global-sound');
-    if(!b){
-      b=document.createElement('button');b.type='button';b.id='eph-story-global-sound';b.className='btn gold small';
-      b.style.cssText='display:inline-flex;align-items:center;justify-content:center;margin:0 0 10px 0;min-height:44px;padding:10px 15px;font-weight:800;';
-      h.parentNode.insertBefore(b,h);
-    }else if(b.parentNode!==h.parentNode||b.nextElementSibling!==h){
-      h.parentNode.insertBefore(b,h);
-    }
-    // Assign a single DOM click handler. Reassigning onclick replaces the prior
-    // handler, so repeated Story renders can never stack multiple toggles.
-    b.dataset.ephMuteV6Bound='1';
-    b.onclick=function(ev){if(ev){ev.preventDefault();ev.stopPropagation();}window.ephSetPublicStorySound(!window.ephStoryMuted);};
-    label();
-  }
-  var pending=false;
-  function refresh(){if(pending)return;pending=true;requestAnimationFrame(function(){pending=false;ensureButton();apply();});}
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',refresh,{once:true});else refresh();
-  var mo=new MutationObserver(refresh);
-  mo.observe(document.documentElement,{childList:true,subtree:true});
-  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')setTimeout(refresh,120);});
-  window.addEventListener('pageshow',function(){setTimeout(refresh,120);});
-})();
-</script>
-
