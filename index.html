@@ -1345,7 +1345,7 @@ window.addEventListener('load',()=>{try{if(typeof nav==='function')nav('dashboar
   const uploadEl=document.getElementById('f_contractFile');let contractFileData=r.contractFileData||'',contractFileName=r.contractFileName||'';
   if(uploadEl&&uploadEl.files&&uploadEl.files[0]){const file=uploadEl.files[0];if(file.size>4*1024*1024)throw new Error('Contract file must be 4 MB or smaller for this stage.');contractFileName=file.name;contractFileData=await new Promise((resolve,reject)=>{const fr=new FileReader();fr.onload=()=>resolve(String(fr.result));fr.onerror=()=>reject(new Error('Could not read contract file.'));fr.readAsDataURL(file);});}
   delete d.contractFile;d.contractFileName=contractFileName;d.contractFileData=contractFileData;d.contractReminderDays=Number(d.contractReminderDays)||30;
-  const source=r.source||(isNew?'Manual':'Manual');const currentCode=String(r.displayCode||r.customerCode||r.customer_code||'');let code=isNew?ephLeadNextCode(type,source):(/^(BYR|TNT|CB|CT|CST)\d+$/.test(currentCode)?currentCode:ephLeadNextCode(type,source));
+  const source=r.source||(isNew?'Manual':'Manual');const currentCode=String(r.displayCode||r.customerCode||r.customer_code||'');let code=isNew?ephLeadNextCode(type,source):(/^(BYR|TNT|CB|CT|CST)\d+$/.test(currentCode)?currentCode:ephLeadNextCode(type,source));let leadDbId=String(r._dbid||'');
   const clean={...Object.fromEntries(Object.entries(r||{}).filter(([k])=>!k.startsWith('_'))),...d,type,id:code,displayCode:code,source,created_at:r.created_at||now,updated_at:now,updated:now};
   clean.commissionAmount=Number(d.commissionAmount??clean.commissionAmount??clean.commission??0)||0;clean.commissionReceived=Number(d.commissionReceived??clean.commissionReceived??clean.received??0)||0;
   clean.commission=clean.commissionAmount;clean.received=clean.commissionReceived;clean.lastUpdated=now;clean.lastUpdatedDisplay=ephLeadLocalStamp();
@@ -1356,7 +1356,7 @@ window.addEventListener('load',()=>{try{if(typeof nav==='function')nav('dashboar
   let newViewingEntry=null;
   if(d.appointmentDate||d.appointmentTime||d.appointmentRemark||d.appointmentResult){const signature=[d.appointmentDate||'',d.appointmentTime||'',d.appointmentProperty||'',d.appointmentRemark||'',d.appointmentResult||''].join('|');const prior=clean.viewingHistory[0];if(!prior||prior._signature!==signature){newViewingEntry={date:d.appointmentDate||'',time:d.appointmentTime||'',property:d.appointmentProperty||'',remark:d.appointmentRemark||'',result:d.appointmentResult||'Pending',nextFollowUpDate:d.nextFollowUpDate||'',savedAt:now,_signature:signature};clean.viewingHistory.unshift(newViewingEntry);}}
   delete clean.lastUpdatedDisplay;
-  if(isNew){const q=await ephRequest('/rest/v1/crm_leads',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({data:clean,updated_at:now})});if(!q.data?.length)throw new Error('Google Sheets / Drive did not confirm the new customer lead.');const saved=q.data[0]?.data||{};code=String(saved.displayCode||saved.customerCode||saved.customer_code||saved.id||code);Object.assign(clean,saved,{id:code,displayCode:code});}
+  if(isNew){const q=await ephRequest('/rest/v1/crm_leads',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({data:clean,updated_at:now})});if(!q.data?.length)throw new Error('Google Sheets / Drive did not confirm the new customer lead.');leadDbId=String(q.data[0].id||'');const saved=q.data[0]?.data||{};code=String(saved.displayCode||saved.customerCode||saved.customer_code||saved.id||code);Object.assign(clean,saved,{id:code,displayCode:code});}
   else {
    if(!r._dbid)throw new Error('Google Sheets / Drive record ID is missing; reload the Customer Leads page before editing.');
    // Re-read the authoritative row so an older open editor cannot restore a deleted file.
@@ -1364,7 +1364,7 @@ window.addEventListener('load',()=>{try{if(typeof nav==='function')nav('dashboar
    if(!Array.isArray(fresh.data)||!fresh.data.length)throw new Error('Customer Lead was not found in Google Sheets / Drive before save.');
    const persisted=fresh.data[0].data&&typeof fresh.data[0].data==='object'?fresh.data[0].data:{};
    if(!(uploadEl&&uploadEl.files&&uploadEl.files[0])&&!persisted.contractFileData&&!persisted.contractFileName){clean.contractFileData='';clean.contractFileName='';}
-   const q=await ephRequest('/rest/v1/crm_leads?id=eq.'+encodeURIComponent(r._dbid),{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({data:clean,updated_at:now})});if(!q.data?.length)throw new Error('Google Sheets / Drive did not confirm the customer update.');
+   const q=await ephRequest('/rest/v1/crm_leads?id=eq.'+encodeURIComponent(r._dbid),{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({data:clean,updated_at:now})});if(!q.data?.length)throw new Error('Google Sheets / Drive did not confirm the customer update.');leadDbId=String(q.data[0].id||r._dbid||'');
   }
   // Close immediately after the primary Customer Lead write is confirmed. Optional viewing
   // history and the full CRM refresh run afterwards so the save button is not held open by them.
@@ -1372,6 +1372,9 @@ window.addEventListener('load',()=>{try{if(typeof nav==='function')nav('dashboar
   toast((isNew?'Saved ':'Updated ')+code+' in Google Sheets / Drive. Refreshing related data…');
   Promise.resolve().then(async()=>{
    try{
+    if(typeof window.ephSyncLeadAgreementFileV2==='function'){
+     await window.ephSyncLeadAgreementFileV2({dbId:leadDbId,code:code,type:type,name:clean.name||'',phone:clean.phone||'',property:clean.appointmentProperty||clean.listingRef||clean.location||'',fileName:clean.contractFileName||'',fileData:clean.contractFileData||'',fileUrl:clean.contractDocumentUrl||clean.documentUrl||'',status:clean.contractStatus||'Pending Review',date:clean.contractStartDate||clean.signingDate||'',leaseEnd:clean.contractEndDate||clean.leaseEnd||'',nextFollowUpDate:clean.nextFollowUpDate||'',remark:clean.remark||''});
+    }
     if(newViewingEntry&&newViewingEntry.date){
      await ephSaveKind('viewing',{id:'VW-'+Date.now(),date:newViewingEntry.date,time:newViewingEntry.time,person:clean.name||'',ref:code,kindLabel:type==='Tenant'?'Tenant Lead':'Buyer Lead',property:newViewingEntry.property||'',status:newViewingEntry.result||'Pending',remark:newViewingEntry.remark||'',result:newViewingEntry.result||'',nextFollowUpDate:newViewingEntry.nextFollowUpDate||'',created_at:now},null);
     }
@@ -1546,7 +1549,11 @@ async function ephEditOwnerForListing(ref){
    if(file){if(file.size>4*1024*1024)throw Error('Agent file must be 4 MB or smaller.');fileName=file.name;fileData=await new Promise((resolve,reject)=>{const fr=new FileReader();fr.onload=()=>resolve(String(fr.result));fr.onerror=()=>reject(new Error('Could not read agent file.'));fr.readAsDataURL(file);});}
    if(!fileData&&!fileName&&!agent.contractFileData&&!agent.contractFileName)return;
    const now=new Date().toISOString();const data={...(row?.data||{}),agentCode:code,agentPhone:agent.phone||'',agentName:agent.name||'',agentFileName:fileName,agentFileData:fileData,contractKind:agent.contractKind||'',contractStatus:agent.contractStatus||agent.latestAgreementStatus||'Other / Blank',contractStartDate:agent.contractStartDate||'',contractEndDate:agent.contractEndDate||'',contractReminderDays:Number(agent.contractReminderDays)||30,contractFileName:agent.contractFileName||'',contractFileData:agent.contractFileData||'',updated_at:now};
-   if(row)await ephRequest('/rest/v1/crm_records?id=eq.'+encodeURIComponent(row.id),{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({data,updated_at:now})});else await ephRequest('/rest/v1/crm_records',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({id:ephNewDbRecordId('agent_attachment'),kind:'agent_attachment',data,updated_at:now})});
+   let savedAttachment;
+   if(row){savedAttachment=await ephRequest('/rest/v1/crm_records?id=eq.'+encodeURIComponent(row.id),{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({data,updated_at:now})});}
+   else{savedAttachment=await ephRequest('/rest/v1/crm_records',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({id:ephNewDbRecordId('agent_attachment'),kind:'agent_attachment',data,updated_at:now})});}
+   if(!Array.isArray(savedAttachment.data)||!savedAttachment.data.length)throw new Error('Agent attachment was not confirmed in Google Sheets / Drive.');
+   return {...data,_attachmentDbId:String(savedAttachment.data[0].id)};
  }
  async function save(r,d,isNew){
   const secondaryErrors=[];
@@ -1693,7 +1700,11 @@ async function ephEditOwnerForListing(ref){
     if(!Array.isArray(result.data)||!result.data.length)console.warn('Canonical Agent profile saved; legacy crm_leads row was not updated.');
   }
   clean._dbid=savedRow.id;clean._sourceTable='crm_records';
-  try{await ephSaveAgentAttachment(clean,upload);}catch(fileErr){secondaryErrors.push('Attachment: '+(fileErr.message||fileErr));}
+  let savedAgentAttachment=null;
+  try{savedAgentAttachment=await ephSaveAgentAttachment(clean,upload);}catch(fileErr){secondaryErrors.push('Attachment: '+(fileErr.message||fileErr));}
+  if(savedAgentAttachment&&(savedAgentAttachment.agentFileName||savedAgentAttachment.agentFileData)){
+    try{if(typeof window.ephUpsertCrmFileReminderV2==='function')await window.ephUpsertCrmFileReminderV2({sourceAttachmentKey:'CRMFILE:AGENT:'+code+':agentFile',sourceCrmTable:'crm_records',sourceCrmKind:'agent_attachment',sourceCrmDbId:String(savedAgentAttachment._attachmentDbId||''),sourceCrmCode:code,sourceFileField:'agentFileData',sourceFileNameField:'agentFileName',ref:code,person:clean.name,property:clean.listingRef||clean.location||'',kind:'Agent Supporting Document',status:'Pending Review',fileName:savedAgentAttachment.agentFileName||'',fileUrl:savedAgentAttachment.agentFileUrl||'',date:'',leaseEnd:'',nextFollowUpDate:clean.nextFollowUpDate||'',remark:'Linked automatically from Agent Database. This is a supporting file, not proof of a signed SPA / Tenancy Agreement.'});}catch(attachLinkErr){secondaryErrors.push('Agent file → SPA / Tenancy Reminder: '+(attachLinkErr.message||attachLinkErr));}
+  }
   // Persist an idempotent Agent-linked SPA/Tenancy tracker record. The row is explicitly
   // marked as an Agent agreement tracker entry; it is not represented as signed unless status says so.
   try{
@@ -1705,7 +1716,7 @@ async function ephEditOwnerForListing(ref){
     let existing=rows.find(x=>String(x.data?.agentRef||x.data?.agentCode||'').trim().toUpperCase()===code.toUpperCase()&&x.data?.agentProfileTracker===true&&String(x.data?.kind||x.data?.kindLabel||'').trim().toLowerCase()===agreementKind.toLowerCase());
     if(!existing&&linkedId)existing=rows.find(x=>String(x.id)===linkedId&&String(x.data?.agentRef||'').trim().toUpperCase()===code.toUpperCase());
     const agreementNow=new Date().toISOString();
-    const agreement={...(existing?.data||{}),id:existing?.data?.id||('DOC-AG-'+code+'-'+(agreementKind==='SPA'?'SPA':'TEN')),ref:code,person:clean.name,property:clean.appointmentProperty||clean.listingRef||'',kind:agreementKind,kindLabel:agreementKind,status:agreementStatus,date:clean.contractStartDate||existing?.data?.date||'',leaseStart:clean.contractStartDate||existing?.data?.leaseStart||'',leaseEnd:clean.contractEndDate||existing?.data?.leaseEnd||'',remindDays:Number(clean.contractReminderDays)||30,documentName:clean.contractFileName||existing?.data?.documentName||'',documentData:clean.contractFileData||existing?.data?.documentData||'',documentUrl:clean.contractDocumentUrl||existing?.data?.documentUrl||'',agentRef:code,agentCode:code,agentName:clean.name,agentPhone:clean.phone||'',agentAgency:clean.company||'',agentDbId:String(savedRow.id),agentProfileTracker:true,created_at:existing?.data?.created_at||agreementNow,updated_at:agreementNow};
+    const agreement={...(existing?.data||{}),id:existing?.data?.id||('DOC-AG-'+code+'-'+(agreementKind==='SPA'?'SPA':'TEN')),ref:code,person:clean.name,property:clean.appointmentProperty||clean.listingRef||'',kind:agreementKind,kindLabel:agreementKind,status:agreementStatus,date:clean.contractStartDate||existing?.data?.date||'',leaseStart:clean.contractStartDate||existing?.data?.leaseStart||'',leaseEnd:clean.contractEndDate||existing?.data?.leaseEnd||'',remindDays:Number(clean.contractReminderDays)||30,documentName:clean.contractFileName||existing?.data?.documentName||'',documentData:'',documentUrl:clean.contractDocumentUrl||existing?.data?.documentUrl||'',sourceAttachmentKey:'CRMFILE:AGENT:'+code+':contractFile',sourceCrmTable:'crm_records',sourceCrmKind:'agent',sourceCrmDbId:String(savedRow.id),sourceCrmCode:code,sourceFileField:'contractFileData',sourceFileNameField:'contractFileName',agentRef:code,agentCode:code,agentName:clean.name,agentPhone:clean.phone||'',agentAgency:clean.company||'',agentDbId:String(savedRow.id),agentProfileTracker:true,created_at:existing?.data?.created_at||agreementNow,updated_at:agreementNow};
     let savedAgreement;
     if(existing){
       const w=await ephRequest('/rest/v1/crm_records?id=eq.'+encodeURIComponent(String(existing.id))+'&kind=eq.lease',{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({data:agreement,updated_at:agreementNow})});
@@ -3430,7 +3441,7 @@ function ephCommissionDashboardStats(){
    if(/draft/.test(n)) return 'Drafting';
    return ORDER.includes(raw)?raw:'Other / Blank';
  }
- function typeOf(row){const v=clean(row.kind||row.kindLabel||row.contractKind||row.latestAgreementKind||row.type).toLowerCase();return /tenancy|tenant|lease/.test(v)?'Tenancy Agreement':'SPA';}
+ function typeOf(row){const v=clean(row.kind||row.kindLabel||row.contractKind||row.latestAgreementKind||row.type).toLowerCase();if(/agent supporting|supporting document|agent file/.test(v))return 'Agent Supporting Document';return /tenancy|tenant|lease/.test(v)?'Tenancy Agreement':'SPA';}
  function keyOf(row,source){
    const explicit=clean(row.linkedAgreementId||row.agreementId||row.latestAgreementId||row.leaseId||row.id||row._dbid);
    const contact=clean(row.displayCode||row.customerCode||row.agentCode||row.agentId||row.ref||row.person||row.name||row.phone);
@@ -3451,11 +3462,13 @@ function ephCommissionDashboardStats(){
      seen.add(key);
      all.push({...row,_statSource:'lease'});
    });
+   const agreementRows=all.filter(r=>typeOf(r)!=='Agent Supporting Document');
+   const supportingRows=all.filter(r=>typeOf(r)==='Agent Supporting Document');
    const byStatus=Object.fromEntries(ORDER.map(k=>[k,0]));
    const byType={SPA:Object.fromEntries(ORDER.map(k=>[k,0])),'Tenancy Agreement':Object.fromEntries(ORDER.map(k=>[k,0]))};
-   all.forEach(r=>{const st=statusOf(r),ty=typeOf(r);byStatus[st]++;byType[ty][st]++;});
+   agreementRows.forEach(r=>{const st=statusOf(r),ty=typeOf(r);byStatus[st]++;byType[ty][st]++;});
    const statCard=(label,value,sub='')=>`<div class="stat"><div class="stat-head">${escapeHtml(label)}</div><strong>${value}</strong>${sub?`<span class="muted">${escapeHtml(sub)}</span>`:''}</div>`;
-   const cards=`<section class="panel" id="eph-central-agreement-statistics" style="margin-bottom:16px"><div class="panel-head"><div><h3>SPA / Tenancy Status Statistics</h3><p>Automatic totals from the saved Agreement Tracker records only. Customer Leads and Agent Database copies are not counted separately. Recalculates whenever the CRM data is rendered or refreshed.</p></div><span class="pill gold">${all.length} total</span></div><div class="stats">${statCard('Total Agreements',all.length,'Deduplicated agreement records')}${statCard('SPA',all.filter(r=>typeOf(r)==='SPA').length,'Buyer agreements')}${statCard('Tenancy Agreement',all.filter(r=>typeOf(r)==='Tenancy Agreement').length,'Tenant agreements')}${ORDER.map(k=>statCard(k,byStatus[k])).join('')}</div><div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Document Type</th>${ORDER.map(k=>`<th>${escapeHtml(k)}</th>`).join('')}<th>Total</th></tr></thead><tbody>${['SPA','Tenancy Agreement'].map(ty=>{const total=Object.values(byType[ty]).reduce((a,b)=>a+b,0);return `<tr><td><b>${ty}</b></td>${ORDER.map(k=>`<td>${byType[ty][k]||0}</td>`).join('')}<td><b>${total}</b></td></tr>`;}).join('')}<tr><td><b>All Agreements</b></td>${ORDER.map(k=>`<td><b>${byStatus[k]||0}</b></td>`).join('')}<td><b>${all.length}</b></td></tr></tbody></table></div></section>`;
+   const cards=`<section class="panel" id="eph-central-agreement-statistics" style="margin-bottom:16px"><div class="panel-head"><div><h3>SPA / Tenancy Status Statistics</h3><p>Agreement totals exclude Agent supporting files; all attachments remain visible in the Agreement Tracker list.</p></div><span class="pill gold">${agreementRows.length} agreements</span></div><div class="stats">${statCard('Total Agreements',agreementRows.length,'Deduplicated agreement records')}${statCard('SPA',agreementRows.filter(r=>typeOf(r)==='SPA').length,'Buyer agreements')}${statCard('Tenancy Agreement',agreementRows.filter(r=>typeOf(r)==='Tenancy Agreement').length,'Tenant agreements')}${statCard('Agent Supporting Files',supportingRows.length,'Shown in the tracker, not counted as agreements')}${ORDER.map(k=>statCard(k,byStatus[k])).join('')}</div><div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Document Type</th>${ORDER.map(k=>`<th>${escapeHtml(k)}</th>`).join('')}<th>Total</th></tr></thead><tbody>${['SPA','Tenancy Agreement'].map(ty=>{const total=Object.values(byType[ty]).reduce((a,b)=>a+b,0);return `<tr><td><b>${ty}</b></td>${ORDER.map(k=>`<td>${byType[ty][k]||0}</td>`).join('')}<td><b>${total}</b></td></tr>`;}).join('')}<tr><td><b>All Agreements</b></td>${ORDER.map(k=>`<td><b>${byStatus[k]||0}</b></td>`).join('')}<td><b>${agreementRows.length}</b></td></tr></tbody></table></div></section>`;
    return cards;
  }
  window.leasesPage=function(){
@@ -3793,6 +3806,7 @@ window.addEventListener('load',()=>ephScheduleStoryExpiry());
       data.contractFileData=''; data.contractFileName=''; data.updated_at=now; data.updated=now;
       const q=await ephRequest('/rest/v1/crm_leads?id=eq.'+encodeURIComponent(String(row.id)),{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({data,updated_at:now})});
       if(!Array.isArray(q.data)||!q.data.length) throw new Error('Google Sheets / Drive did not confirm the file deletion.');
+      try{if(typeof window.ephMarkCrmFileReminderRemovedV2==='function')await window.ephMarkCrmFileReminderRemovedV2('CRMFILE:LEAD:'+String(record._dbid)+':contractFile');}catch(syncErr){console.warn('Agreement Reminder file unlink needs review:',syncErr);}
       toast('SPA / Tenancy file deleted and synced to Google Sheets / Drive. Customer Lead was kept.');
     }catch(e){
       if(record){try{record.contractFileData=previousData;record.contractFileName=previousName;}catch(_){}}
@@ -3856,6 +3870,7 @@ window.addEventListener('load',()=>ephScheduleStoryExpiry());
         changed=true;
       }
       if(!changed) throw new Error('Saved file record was not found. Please reload Agent Database and try again.');
+      try{if(typeof window.ephMarkCrmFileReminderRemovedV2==='function')await window.ephMarkCrmFileReminderRemovedV2('CRMFILE:AGENT:'+code+':'+(fileType==='contract'?'contractFile':'agentFile'));}catch(syncErr){console.warn('Agreement Reminder file unlink needs review:',syncErr);}
       toast(label+' deleted and synced to Google Sheets / Drive. Agent Database record was kept.');
     }catch(e){
       // Restore local file display if any part of the Google Sheets / Drive update failed.
@@ -4122,7 +4137,7 @@ window.addEventListener('load',()=>ephScheduleStoryExpiry());
  const norm=v=>T(v).toLowerCase().replace(/[^a-z0-9]/g,'');
  const val=(o,names)=>{for(const n of names){const k=Object.keys(o||{}).find(x=>norm(x)===norm(n));if(k&&T(o[k]))return o[k];}return '';};
  const roleOf=r=>{const v=T(val(r,['type','role','customerType','customer_type','Buyer / Tenant','Buyer/Tenant','Which best describes you?','Which best describes you? / 您的身份是？'])).toLowerCase();return /tenant|租客|tenancy|lease/.test(v)?'Tenant':/buyer|买家|spa/.test(v)?'Buyer':'';};
- const kindOf=r=>{const v=T(val(r,['kind','kindLabel','contractKind','latestAgreementKind','documentType','document','agreementType','agreement_type','type','role','customerType','customer_type'])).toLowerCase();if(/tenancy|tenant|lease/.test(v))return 'Tenancy Agreement';if(/spa|buyer|sale|purchase/.test(v))return 'SPA';const role=roleOf(r);return role==='Tenant'?'Tenancy Agreement':role==='Buyer'?'SPA':'';};
+ const kindOf=r=>{const v=T(val(r,['kind','kindLabel','contractKind','latestAgreementKind','documentType','document','agreementType','agreement_type','type','role','customerType','customer_type'])).toLowerCase();if(/agent supporting|supporting document|agent file/.test(v))return 'Agent Supporting Document';if(/tenancy|tenant|lease/.test(v))return 'Tenancy Agreement';if(/spa|buyer|sale|purchase/.test(v))return 'SPA';const role=roleOf(r);return role==='Tenant'?'Tenancy Agreement':role==='Buyer'?'SPA':'';};
  const statusOf=r=>{const raw=T(val(r,['contractStatus','latestAgreementStatus','agreementStatus','agreement_status','status','workflowStatus','documentStatus']));const n=raw.toLowerCase();if(/complet|closed|fully executed/.test(n))return 'Completed';if(/signed|executed/.test(n))return 'Signed';if(/pending|await|signature|signing|in progress/.test(n))return 'Pending Signature';if(/draft/.test(n))return 'Drafting';return ORDER.includes(raw)?raw:'Other / Blank';};
  const dateOf=(r,names)=>T(val(r,names));
  const agreementEvidence=r=>{
@@ -5327,6 +5342,404 @@ document.addEventListener('click', function(event) {
   // asynchronous load finishes, without introducing a manual Refresh action.
 })();
 </script>
+
+\n<script id="eph-story-autoplay-and-auto-next-v4">
+(function(){
+  'use strict';
+  if (window.__ephStoryAutoNextV4Installed) return;
+  window.__ephStoryAutoNextV4Installed = true;
+
+  // Keep the user's sound choice across Story changes and page re-entry.
+  try {
+    var savedStorySound = localStorage.getItem('ephStoryMuted');
+    window.ephStoryMuted = savedStorySound === null ? true : savedStorySound === '1';
+  } catch (e) {
+    window.ephStoryMuted = true;
+  }
+  var driveTimer = null;
+  var currentStoryKey = '';
+  var youtubePlayer = null;
+  var vimeoPlayer = null;
+  var currentProvider = '';
+  var autoNextLock = false;
+  var youtubeApiPromise = null;
+  var vimeoApiPromise = null;
+
+  function escapeHtml(v){
+    if (typeof window.escapePublic === 'function') return window.escapePublic(v);
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);});
+  }
+  function storyRows(){
+    try { return Array.isArray(ephPublicStoryItems) ? ephPublicStoryItems : []; }
+    catch(e) { return Array.isArray(window.ephPublicStoryItems) ? window.ephPublicStoryItems : []; }
+  }
+  function storyIndex(){
+    try { return Number(ephPublicStoryIndex) || 0; }
+    catch(e) { return Number(window.ephPublicStoryIndex) || 0; }
+  }
+  function setStoryIndex(n){
+    try { ephPublicStoryIndex = n; } catch(e) {}
+    window.ephPublicStoryIndex = n;
+  }
+  function dataObject(row){
+    if (!row || typeof row !== 'object') return {};
+    var d = row.data;
+    if (d && typeof d === 'object' && !Array.isArray(d)) return d;
+    if (typeof d === 'string' && d.trim()) { try { var p=JSON.parse(d); return p && typeof p==='object' && !Array.isArray(p) ? p : {}; } catch(e) {} }
+    return {};
+  }
+  function videoUrl(row){
+    var d=dataObject(row);
+    return String(row.video_url||row.url||row.media_url||row.video||row.file_url||row.link||d.video_url||d.url||d.media_url||d.file_url||d.link||'').trim();
+  }
+  function driveFileId(row){
+    var d=dataObject(row);
+    var direct=row.drive_file_id||row.driveFileId||row.file_id||row.fileId||row.google_drive_file_id||d.drive_file_id||d.driveFileId||d.file_id||d.fileId||d.google_drive_file_id||'';
+    if (direct && /^[A-Za-z0-9_-]{15,}$/.test(String(direct))) return String(direct);
+    var all=[videoUrl(row),row.download_url,row.downloadUrl,d.download_url,d.downloadUrl].filter(Boolean).join(' ');
+    var m=all.match(/drive\.google\.com\/file\/d\/([A-Za-z0-9_-]{15,})/i)||all.match(/[?&]id=([A-Za-z0-9_-]{15,})/i);
+    return m ? m[1] : '';
+  }
+  function durationSeconds(row){
+    var d=dataObject(row);
+    var secondsValues=[row.duration_seconds,row.durationSeconds,row.video_duration_seconds,row.videoDurationSeconds,d.duration_seconds,d.durationSeconds,d.video_duration_seconds,d.videoDurationSeconds];
+    for (var i=0;i<secondsValues.length;i++){var n=Number(secondsValues[i]);if(Number.isFinite(n)&&n>0)return n;}
+    var millisValues=[row.videoMediaMetadata&&row.videoMediaMetadata.durationMillis,d.videoMediaMetadata&&d.videoMediaMetadata.durationMillis,row.durationMillis,d.durationMillis];
+    for (var j=0;j<millisValues.length;j++){var ms=Number(millisValues[j]);if(Number.isFinite(ms)&&ms>0)return ms/1000;}
+    var generic=[row.duration,d.duration];
+    for (var k=0;k<generic.length;k++){var v=generic[k];if(typeof v==='string'&&/^\d{1,2}:\d{2}(?::\d{2})?$/.test(v)){var parts=v.split(':').map(Number);return parts.length===3?parts[0]*3600+parts[1]*60+parts[2]:parts[0]*60+parts[1];}var g=Number(v);if(Number.isFinite(g)&&g>0)return g>10000?g/1000:g;}
+    return 0;
+  }
+  function activeRows(){
+    return storyRows().filter(function(x){
+      if (typeof window.ephStoryIsPublicActive==='function') return window.ephStoryIsPublicActive(x);
+      var p=x&&(x.published!==undefined?x.published:(x.is_public!==undefined?x.is_public:true));
+      if (p===false || String(p).toLowerCase()==='false' || String(p)==='0') return false;
+      var expiry=x&&(x.expires_at||x.expiresAt||x.data&&x.data.expires_at||x.data&&x.data.expiresAt);
+      var ms=expiry?Date.parse(expiry):NaN;
+      return !Number.isFinite(ms)||ms>Date.now();
+    });
+  }
+  function clearDriveTimer(){ if(driveTimer){clearTimeout(driveTimer);driveTimer=null;} }
+  function stopCurrentPlayer(){
+    clearDriveTimer();
+    try { if(youtubePlayer&&youtubePlayer.pauseVideo) youtubePlayer.pauseVideo(); } catch(e) {}
+    try { if(vimeoPlayer&&vimeoPlayer.pause) vimeoPlayer.pause(); } catch(e) {}
+    youtubePlayer=null; vimeoPlayer=null; currentProvider='';
+    window.__ephStoryYouTubePlayer=null;window.__ephStoryVimeoPlayer=null;
+  }
+  function safeAdvance(key){
+    if (autoNextLock || key!==currentStoryKey) return;
+    autoNextLock=true;
+    clearDriveTimer();
+    setTimeout(function(){
+      autoNextLock=false;
+      var rows=activeRows();
+      if (!rows.length) return;
+      var idx=storyIndex();
+      setStoryIndex((idx+1)%rows.length);
+      renderCurrentStory();
+    },250);
+  }
+  function addAutoplayHint(host, message){
+    var old=host.querySelector('.eph-story-autoplay-hint');
+    if(!old){old=document.createElement('div');old.className='eph-story-autoplay-hint';old.style.cssText='margin-top:8px;font-size:11px;color:var(--muted);';host.appendChild(old);}
+    old.textContent=message;
+  }
+  function loadYouTubeApi(){
+    if(window.YT && window.YT.Player) return Promise.resolve(window.YT);
+    if(youtubeApiPromise) return youtubeApiPromise;
+    youtubeApiPromise=new Promise(function(resolve,reject){
+      var finished=false;
+      var timer=setTimeout(function(){if(!finished){finished=true;reject(new Error('YouTube player API timed out'));}},15000);
+      var prior=window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady=function(){
+        try { if(typeof prior==='function') prior(); } catch(e) {}
+        if(!finished){finished=true;clearTimeout(timer);resolve(window.YT);}
+      };
+      var existing=document.querySelector('script[src*="youtube.com/iframe_api"]');
+      if(!existing){var script=document.createElement('script');script.src='https://www.youtube.com/iframe_api';script.async=true;script.onerror=function(){if(!finished){finished=true;clearTimeout(timer);reject(new Error('Could not load YouTube player API'));}};document.head.appendChild(script);}
+    });
+    return youtubeApiPromise;
+  }
+  function loadVimeoApi(){
+    if(window.Vimeo && window.Vimeo.Player) return Promise.resolve(window.Vimeo);
+    if(vimeoApiPromise) return vimeoApiPromise;
+    vimeoApiPromise=new Promise(function(resolve,reject){
+      var existing=document.querySelector('script[src*="player.vimeo.com/api/player.js"]');
+      var timer=setTimeout(function(){reject(new Error('Vimeo player API timed out'));},15000);
+      function check(){if(window.Vimeo&&window.Vimeo.Player){clearTimeout(timer);resolve(window.Vimeo);return true;}return false;}
+      if(check())return;
+      if(!existing){var script=document.createElement('script');script.src='https://player.vimeo.com/api/player.js';script.async=true;script.onload=function(){if(!check())setTimeout(check,100);};script.onerror=function(){clearTimeout(timer);reject(new Error('Could not load Vimeo player API'));};document.head.appendChild(script);}
+      var attempts=0;var poll=setInterval(function(){attempts++;if(check()||attempts>100){clearInterval(poll);if(attempts>100)reject(new Error('Vimeo player API unavailable'));}},150);
+    });
+    return vimeoApiPromise;
+  }
+  function setSound(muted){
+    window.ephStoryMuted=!!muted;
+    try { localStorage.setItem('ephStoryMuted', window.ephStoryMuted ? '1' : '0'); } catch (e) {}
+    var host=document.getElementById('ephPublicStoryPlayer');
+    if(host){
+      host.querySelectorAll('video').forEach(function(video){
+        video.defaultMuted=window.ephStoryMuted;
+        video.muted=window.ephStoryMuted;
+        if(!window.ephStoryMuted){var p=video.play();if(p&&p.catch)p.catch(function(){});}
+      });
+    }
+    var yt=window.__ephStoryYouTubePlayer||youtubePlayer;
+    try { if(yt){if(window.ephStoryMuted&&yt.mute)yt.mute();else if(!window.ephStoryMuted&&yt.unMute)yt.unMute();} } catch(e) {}
+    var vm=window.__ephStoryVimeoPlayer||vimeoPlayer;
+    try { if(vm&&vm.setMuted){var vp=vm.setMuted(window.ephStoryMuted);if(vp&&vp.catch)vp.catch(function(){});} } catch(e) {}
+    var frame=host&&host.querySelector('iframe');
+    if(frame){try{var fu=new URL(frame.src);if(/youtube-nocookie\.com|youtube\.com/.test(fu.hostname)){frame.contentWindow.postMessage(JSON.stringify({event:'command',func:window.ephStoryMuted?'mute':'unMute',args:[]}), '*');}else if(/player\.vimeo\.com/.test(fu.hostname)){frame.contentWindow.postMessage(JSON.stringify({method:'setMuted',value:window.ephStoryMuted}), '*');frame.contentWindow.postMessage(JSON.stringify({method:'setVolume',value:window.ephStoryMuted?0:1}), '*');}}catch(e){}}
+    var label=window.ephStoryMuted?'🔇 Story 全部静音中 · 点击开启声音':'🔊 Story 声音已开启 · 点击全部静音';
+    var drivePreview=!!(host&&host.querySelector('iframe.eph-drive-video-preview'));
+    var btn=document.getElementById('eph-story-global-sound');
+    if(btn){btn.textContent=label+(drivePreview?'（Drive 预览请用播放器内喇叭）':'');btn.title=drivePreview?'Google Drive Preview 受跨域限制，外部按钮不能改变它的音量。':'一键切换当前及后续 Story 的声音。';}
+    var inline=host&&host.querySelector('[data-eph-story-sound]');if(inline)inline.textContent=window.ephStoryMuted?'🔇 Sound Off':'🔊 Sound On';
+  }
+  window.ephSetPublicStorySound=setSound;
+  function buildYouTubeUrl(embed){
+    var u=new URL(embed);
+    u.searchParams.set('autoplay','1');u.searchParams.set('mute',window.ephStoryMuted?'1':'0');u.searchParams.set('playsinline','1');u.searchParams.set('enablejsapi','1');u.searchParams.set('controls','1');
+    if(location.origin&&location.origin!=='null')u.searchParams.set('origin',location.origin);
+    return u.toString();
+  }
+  function buildVimeoUrl(embed){
+    var u=new URL(embed);
+    u.searchParams.set('autoplay','1');u.searchParams.set('muted',window.ephStoryMuted?'1':'0');u.searchParams.set('playsinline','1');u.searchParams.set('autopause','0');u.searchParams.set('loop','0');
+    return u.toString();
+  }
+  function bindDriveTimer(frame,row,key,host){
+    var seconds=durationSeconds(row);
+    if(seconds>0){
+      // Drive preview does not expose a supported cross-origin "ended" event.
+      // Use the file's stored duration, with a small load/buffer allowance, as an auto-next timer.
+      var ms=Math.max(4000,Math.ceil(seconds*1000)+5000);
+      driveTimer=setTimeout(function(){safeAdvance(key);},ms);
+      addAutoplayHint(host,'Auto-next is scheduled from the saved video duration ('+Math.round(seconds)+'s).');
+    }else{
+      addAutoplayHint(host,'This older Drive Story has no saved duration yet. Use Next manually; new uploads will save duration for auto-next.');
+    }
+  }
+  function bindPlayer(row,key){
+    var host=document.getElementById('ephPublicStoryPlayer');if(!host)return;
+    var video=host.querySelector('video');
+    if(video){
+      currentProvider='native';
+      video.muted=!!window.ephStoryMuted;video.defaultMuted=!!window.ephStoryMuted;video.autoplay=true;video.playsInline=true;video.preload='auto';
+      if(video.dataset.ephAutoNextV4!=='1'){
+        video.dataset.ephAutoNextV4='1';
+        video.addEventListener('ended',function(){safeAdvance(key);},{once:true});
+      }
+      if(video.dataset.ephDriveFileId){
+        watchDriveNative(video,row,key,host);
+      }
+      var p=video.play();
+      if(p&&typeof p.catch==='function')p.catch(function(){addAutoplayHint(host,'Browser blocked automatic playback. Tap Play on the video; the next Story will start automatically when it ends.');});
+      return;
+    }
+    var frame=host.querySelector('iframe');if(!frame)return;
+    var src=String(frame.src||'');
+    if(/drive\.google\.com/i.test(src)){
+      currentProvider='drive';
+      frame.allow='autoplay; encrypted-media; picture-in-picture; fullscreen';
+      if(frame.dataset.ephDriveAutoNextV4!=='1'){
+        frame.dataset.ephDriveAutoNextV4='1';
+        frame.addEventListener('load',function(){if(key!==currentStoryKey)return;bindDriveTimer(frame,row,key,host);},{once:true});
+      }
+      // If the load event already fired before this handler was attached, start the timer now.
+      setTimeout(function(){if(key===currentStoryKey&&!driveTimer)bindDriveTimer(frame,row,key,host);},1200);
+      return;
+    }
+    if(/youtube-nocookie\.com|youtube\.com/i.test(src)){
+      currentProvider='youtube';
+      loadYouTubeApi().then(function(YT){
+        if(key!==currentStoryKey||!frame.isConnected)return;
+        if(frame.dataset.ephYtBoundV4==='1')return;
+        frame.dataset.ephYtBoundV4='1';
+        if(!frame.id)frame.id='ephStoryYouTubePlayerV4';
+        youtubePlayer=new YT.Player(frame.id,{
+          events:{
+            onReady:function(e){try{window.__ephStoryYouTubePlayer=e.target;if(window.ephStoryMuted)e.target.mute();else e.target.unMute();e.target.playVideo();}catch(err){}},
+            onStateChange:function(e){if(e.data===0)safeAdvance(key);},
+            onAutoplayBlocked:function(){addAutoplayHint(host,'Browser blocked autoplay. Tap Play in the YouTube player; auto-next remains enabled.');}
+          }
+        });
+      }).catch(function(err){addAutoplayHint(host,'YouTube auto-next could not connect to its player API. Use Next manually.');});
+      return;
+    }
+    if(/player\.vimeo\.com/i.test(src)){
+      currentProvider='vimeo';
+      loadVimeoApi().then(function(Vimeo){
+        if(key!==currentStoryKey||!frame.isConnected)return;
+        if(frame.dataset.ephVimeoBoundV4==='1')return;
+        frame.dataset.ephVimeoBoundV4='1';
+        vimeoPlayer=new Vimeo.Player(frame);window.__ephStoryVimeoPlayer=vimeoPlayer;
+        vimeoPlayer.on('ended',function(){safeAdvance(key);});
+        return Promise.all([vimeoPlayer.setMuted(!!window.ephStoryMuted).catch(function(){}),vimeoPlayer.setAutopause(false).catch(function(){})]).then(function(){return vimeoPlayer.play().catch(function(){addAutoplayHint(host,'Browser blocked Vimeo autoplay. Tap Play in the player; auto-next remains enabled.');});});
+      }).catch(function(){addAutoplayHint(host,'Vimeo auto-next could not connect to its player API. Use Next manually.');});
+    }
+  }
+  function ensureGlobalSoundButton(host){
+    if(!host||!host.parentNode)return;
+    var parent=host.parentNode,btn=document.getElementById('eph-story-global-sound');
+    if(!btn){
+      btn=document.createElement('button');btn.type='button';btn.id='eph-story-global-sound';btn.className='btn gold small';
+      btn.style.cssText='display:inline-flex;align-items:center;justify-content:center;margin:0 0 10px 0;min-height:42px;padding:9px 14px;font-weight:800;';
+    }
+    if(btn.parentNode!==parent||btn.nextElementSibling!==host)parent.insertBefore(btn,host);
+    var drivePreview=!!host.querySelector('iframe.eph-drive-video-preview');
+    btn.textContent=(window.ephStoryMuted?'🔇 Story sound off · tap to enable':'🔊 Story sound on · tap to mute')+(drivePreview?' · Drive volume inside player':'');
+    btn.title=drivePreview?'Google Drive Preview is cross-origin. Use the speaker control inside the video for this Story.':'Toggle sound for Story videos.';
+  }
+  function driveDirectUrl(row,id){
+    var d=dataObject(row);
+    var raw=videoUrl(row);
+    var candidate=row.webContentLink||row.download_url||row.downloadUrl||d.webContentLink||d.download_url||d.downloadUrl||(/drive\.google\.com\/uc\?/i.test(raw)?raw:'');
+    if(candidate&&/^https:\/\//i.test(String(candidate))&&!/\/file\/d\//i.test(String(candidate)))return String(candidate);
+    // Use the public Drive file content URL in a native video element first.
+    // If Google returns an interstitial instead of media, the player falls back to Drive Preview.
+    return 'https://drive.google.com/uc?export=download&id='+encodeURIComponent(id);
+  }
+  function fallbackDrivePreview(video,row,key,host){
+    if(!video||!video.isConnected||key!==currentStoryKey||video.dataset.ephDriveFallbackDone==='1')return;
+    video.dataset.ephDriveFallbackDone='1';
+    if(video.__ephDriveTryTimer){clearTimeout(video.__ephDriveTryTimer);video.__ephDriveTryTimer=null;}
+    var id=video.dataset.ephDriveFileId;if(!id)return;
+    var frame=document.createElement('iframe');frame.className='eph-drive-video-preview';frame.dataset.ephProvider='drive';
+    frame.title=String(row.title||row.name||'Property Video');
+    frame.allow='autoplay; encrypted-media; picture-in-picture; fullscreen';frame.allowFullscreen=true;
+    frame.loading='eager';frame.referrerPolicy='strict-origin-when-cross-origin';
+    frame.src='https://drive.google.com/file/d/'+encodeURIComponent(id)+'/preview?autoplay=1&mute='+(window.ephStoryMuted?'1':'0');
+    video.replaceWith(frame);currentProvider='drive';
+    addAutoplayHint(host,'這個 Drive 檔案未能提供原生影片串流，已退回 Google Drive Preview。Preview 的聲音只能使用影片內的喇叭控制；外部一鍵按鈕無法跨域控制。');
+    var btn=document.getElementById('eph-story-global-sound');if(btn){btn.textContent=(window.ephStoryMuted?'🔇 Story 全部靜音中':'🔊 Story 聲音已開啟')+'（此 Drive Preview 需用內部喇叭）';btn.title='Drive Preview 不提供外部網頁音量控制。';}
+    bindDriveTimer(frame,row,key,host);
+  }
+  function watchDriveNative(video,row,key,host){
+    if(!video||!video.isConnected||key!==currentStoryKey)return;
+    if(video.readyState>=1){video.dataset.ephDriveReadyV6='1';video.muted=!!window.ephStoryMuted;return;}
+    if(video.__ephDriveTryTimer)clearTimeout(video.__ephDriveTryTimer);
+    var settled=false;
+    function ready(){if(settled)return;settled=true;video.dataset.ephDriveReadyV6='1';if(video.__ephDriveTryTimer)clearTimeout(video.__ephDriveTryTimer);video.muted=!!window.ephStoryMuted;video.defaultMuted=!!window.ephStoryMuted;}
+    function failed(){if(settled)return;settled=true;if(video.__ephDriveTryTimer)clearTimeout(video.__ephDriveTryTimer);retryDriveNative(video,row,key,host);}
+    video.addEventListener('loadedmetadata',ready,{once:true});
+    video.addEventListener('error',failed,{once:true});
+    video.__ephDriveTryTimer=setTimeout(function(){if(!settled&&video.isConnected&&video.readyState<1)failed();},12000);
+  }
+  function retryDriveNative(video,row,key,host){
+    if(!video||!video.isConnected||key!==currentStoryKey)return;
+    var attempt=Number(video.dataset.ephDriveAttemptV6||0);
+    if(attempt<1){
+      var id=video.dataset.ephDriveFileId;if(!id){fallbackDrivePreview(video,row,key,host);return;}
+      video.dataset.ephDriveAttemptV6='1';
+      var alternate='https://drive.usercontent.google.com/download?id='+encodeURIComponent(id)+'&export=download&confirm=t';
+      video.pause();video.src=alternate;video.load();
+      video.muted=!!window.ephStoryMuted;video.defaultMuted=!!window.ephStoryMuted;
+      watchDriveNative(video,row,key,host);
+      var play=video.play();if(play&&play.catch)play.catch(function(){});
+      return;
+    }
+    fallbackDrivePreview(video,row,key,host);
+  }
+  function renderCurrentStory(){
+    stopCurrentPlayer();
+    var host=document.getElementById('ephPublicStoryPlayer');if(!host)return;
+    var items=activeRows();
+    if(!items.length){host.innerHTML='<div class="empty"><strong>No videos published yet</strong>New Story & Video Story posts will appear here.</div>';return;}
+    var index=storyIndex();if(index>=items.length)index=0;if(index<0)index=0;setStoryIndex(index);
+    var row=items[index];
+    var raw=videoUrl(row),title=String(row.title||row.name||row.caption||dataObject(row).title||'Property Video');
+    var driveId=driveFileId(row),embed=raw&&typeof window.ephEmbedUrl==='function'?window.ephEmbedUrl(raw):raw;
+    var media='';
+    if(driveId){
+      var direct=driveDirectUrl(row,driveId);
+      media='<video data-eph-drive-file-id="'+escapeHtml(driveId)+'" src="'+escapeHtml(direct)+'" controls autoplay '+(window.ephStoryMuted?'muted':'')+' playsinline preload="metadata"></video>';
+    }else if(embed&&/youtube-nocookie\.com\/embed|player\.vimeo\.com\/video/i.test(embed)){
+      var providerUrl=/youtube-nocookie\.com|youtube\.com/i.test(embed)?buildYouTubeUrl(embed):buildVimeoUrl(embed);
+      media='<iframe src="'+escapeHtml(providerUrl)+'" title="'+escapeHtml(title)+'" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="eager"></iframe>';
+    }else if(raw&&(/\.(mp4|m4v|mov|webm|ogv|ogg)(\?|#|$)/i.test(raw)||String(row.media_type||row.type||'').toLowerCase().indexOf('video')>=0)){
+      media='<video src="'+escapeHtml(raw)+'" controls autoplay '+(window.ephStoryMuted?'muted':'')+' playsinline preload="auto"></video>';
+    }else if(raw){
+      media='<div class="eph-video-link"><span>▶</span><a href="'+escapeHtml(raw)+'" target="_blank" rel="noopener">Open video ↗</a></div>';
+    }else{
+      host.innerHTML='<div class="empty">This Story has no video URL.</div>';return;
+    }
+    var key=String(row.id||row.drive_file_id||row.driveFileId||raw||('story-'+index));
+    currentStoryKey=key;
+    host.innerHTML='<div class="eph-story-frame">'+media+'</div><div class="eph-story-controls"><button class="btn small" type="button" data-eph-story-prev '+(items.length<2?'disabled':'')+'>← Previous</button><span>'+escapeHtml((index+1)+' / '+items.length+' · '+title)+'</span><button class="btn small" type="button" data-eph-story-next '+(items.length<2?'disabled':'')+'>Next →</button></div>';
+    ensureGlobalSoundButton(host);
+    var prev=host.querySelector('[data-eph-story-prev]'),next=host.querySelector('[data-eph-story-next]');
+    if(prev)prev.addEventListener('click',function(){window.ephMovePublicStory(-1);});
+    if(next)next.addEventListener('click',function(){window.ephMovePublicStory(1);});
+    setTimeout(function(){bindPlayer(row,key);},180);
+  }
+  window.ephPublicStoryMarkup=renderCurrentStory;
+  try{ephPublicStoryMarkup=renderCurrentStory;}catch(e){}
+  window.ephMovePublicStory=function(delta){
+    var items=activeRows();if(!items.length)return;
+    var idx=storyIndex();setStoryIndex((idx+Number(delta||0)+items.length)%items.length);
+    renderCurrentStory();
+  };
+  try{ephMovePublicStory=window.ephMovePublicStory;}catch(e){}
+
+  // Read the local upload's actual duration before sending it to Drive and persist it to site_videos.
+  function readLocalVideoDuration(file){
+    return new Promise(function(resolve){
+      if(!file){resolve(0);return;}
+      var objectUrl='',video=document.createElement('video'),done=false;
+      var timer=setTimeout(function(){finish(0);},10000);
+      function finish(value){if(done)return;done=true;clearTimeout(timer);try{video.removeAttribute('src');video.load();}catch(e){}if(objectUrl)URL.revokeObjectURL(objectUrl);resolve(Number.isFinite(value)&&value>0?value:0);}
+      video.preload='metadata';video.muted=true;
+      video.onloadedmetadata=function(){finish(Number(video.duration));};
+      video.onerror=function(){finish(0);};
+      try{objectUrl=URL.createObjectURL(file);video.src=objectUrl;video.load();}catch(e){finish(0);}
+    });
+  }
+  var baseInsert=window.ephInsertCloudStory;
+  if(typeof baseInsert==='function'&&!baseInsert.__ephDurationWrappedV4){
+    var insertWrapped=async function(payload){
+      var duration=Number(window.__ephStoryPendingDurationSeconds||0);
+      var next=Object.assign({},payload||{});
+      if(duration>0)next.duration_seconds=duration;
+      return baseInsert.call(this,next);
+    };
+    insertWrapped.__ephDurationWrappedV4=true;window.ephInsertCloudStory=insertWrapped;
+    try{ephInsertCloudStory=insertWrapped;}catch(e){}
+  }
+  var basePublish=window.ephPublishStory;
+  if(typeof basePublish==='function'&&!basePublish.__ephDurationReadV4){
+    var publishWrapped=async function(ev){
+      var input=document.getElementById('ephStoryFile');
+      var file=input&&input.files&&input.files[0];
+      window.__ephStoryPendingDurationSeconds=file?await readLocalVideoDuration(file):0;
+      try{return await basePublish.apply(this,arguments);}
+      finally{window.__ephStoryPendingDurationSeconds=0;}
+    };
+    publishWrapped.__ephDurationReadV4=true;window.ephPublishStory=publishWrapped;
+    try{ephPublishStory=publishWrapped;}catch(e){}
+  }
+
+  // Load stories at Customer View entry and autoplay the first active Story.
+  var baseLoad=window.ephLoadPublicStories;
+  if(typeof baseLoad==='function'&&!baseLoad.__ephAutoNextLoadV4){
+    var loadWrapped=async function(){var result=await baseLoad.apply(this,arguments);setTimeout(renderCurrentStory,120);return result;};
+    loadWrapped.__ephAutoNextLoadV4=true;window.ephLoadPublicStories=loadWrapped;
+    try{ephLoadPublicStories=loadWrapped;}catch(e){}
+  }
+  var priorShow=window.showCustomer;
+  if(typeof priorShow==='function'&&!priorShow.__ephStoryAutoNextV4){
+    var showWrapped=function(){var out=priorShow.apply(this,arguments);setTimeout(renderCurrentStory,250);return out;};
+    showWrapped.__ephStoryAutoNextV4=true;window.showCustomer=showWrapped;
+    try{showCustomer=showWrapped;}catch(e){}
+  }
+  document.addEventListener('DOMContentLoaded',function(){setTimeout(function(){if(document.getElementById('ephPublicStoryPlayer')&&activeRows().length)renderCurrentStory();},600);},{once:true});
+  window.addEventListener('load',function(){setTimeout(function(){if(document.getElementById('ephPublicStoryPlayer')&&activeRows().length)renderCurrentStory();},800);},{once:true});
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'){var host=document.getElementById('ephPublicStoryPlayer');if(host&&!host.querySelector('video')&&!host.querySelector('iframe')&&activeRows().length)renderCurrentStory();}});
+})();
+</script>
+
 </body></html>
 <!-- EPH persistence repair: expanded listing row hydration and awaited owner CRM sync on Property Listing save. -->
 
@@ -5336,6 +5749,8 @@ document.addEventListener('click', function(event) {
 .eph-public-card .eph-photo-strip{contain:layout paint;}
 .eph-public-card .eph-photo-strip img{display:block;width:100%;height:54px;object-fit:cover;}
 .eph-story-frame video,.eph-story-frame iframe{display:block;width:100%;height:100%;}
+#eph-story-global-sound{position:relative;z-index:2;font-weight:700;}
+.eph-story-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 </style>
 <script id="eph-customer-photo-visible-priority-story-muted-autoplay-20261101">
 (function(){
@@ -5461,8 +5876,8 @@ document.addEventListener('click', function(event) {
   window.addEventListener('pageshow',function(){setTimeout(scanCards,150);});
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',scanCards,{once:true});else setTimeout(scanCards,0);
 
-  // Reliable browser autoplay requires muted playback first. Customers can tap Sound On.
-  window.ephStoryMuted=true;
+  // Keep the sound choice selected by the persistent Story sound button.
+  if(typeof window.ephStoryMuted!=='boolean')window.ephStoryMuted=true;
   var storyObserver=null;
   function storyHost(){return document.getElementById('ephPublicStoryPlayer');}
   function visibleEnough(el){
@@ -5477,10 +5892,10 @@ document.addEventListener('click', function(event) {
     try{
       var u=new URL(frame.src,location.href);
       if(/youtube-nocookie\.com|youtube\.com/.test(u.hostname)){
-        u.searchParams.set('autoplay','1');u.searchParams.set('mute','1');u.searchParams.set('playsinline','1');u.searchParams.set('enablejsapi','1');
+        u.searchParams.set('autoplay','1');u.searchParams.set('mute',window.ephStoryMuted?'1':'0');u.searchParams.set('playsinline','1');u.searchParams.set('enablejsapi','1');
         if(location.origin&&location.origin!=='null')u.searchParams.set('origin',location.origin);
       }else if(/player\.vimeo\.com/.test(u.hostname)){
-        u.searchParams.set('autoplay','1');u.searchParams.set('muted','1');u.searchParams.set('playsinline','1');u.searchParams.set('autopause','0');
+        u.searchParams.set('autoplay','1');u.searchParams.set('muted',window.ephStoryMuted?'1':'0');u.searchParams.set('playsinline','1');u.searchParams.set('autopause','0');
       }
       var next=u.toString();
       if(frame.src!==next)frame.src=next;
@@ -5491,7 +5906,7 @@ document.addEventListener('click', function(event) {
     var host=storyHost();if(!visibleEnough(host))return;
     var media=host.querySelector('video');
     if(media){
-      media.muted=true;media.defaultMuted=true;media.autoplay=true;media.playsInline=true;media.preload='auto';
+      media.muted=!!window.ephStoryMuted;media.defaultMuted=!!window.ephStoryMuted;media.autoplay=true;media.playsInline=true;media.preload='auto';
       if(media.dataset.ephEndedAdvance!=='1'){
         media.dataset.ephEndedAdvance='1';
         media.addEventListener('ended',function(){if(typeof window.ephMovePublicStory==='function')window.ephMovePublicStory(1);},{once:true});
@@ -5503,8 +5918,8 @@ document.addEventListener('click', function(event) {
     if(frame){
       prepareIframe(frame);
       try{
-        if(/youtube-nocookie\.com|youtube\.com/.test(frame.src))frame.contentWindow.postMessage(JSON.stringify({event:'command',func:'mute',args:[]}),'*');
-        else if(/player\.vimeo\.com/.test(frame.src)){frame.contentWindow.postMessage(JSON.stringify({method:'setVolume',value:0}),'*');frame.contentWindow.postMessage(JSON.stringify({method:'play'}),'*');}
+        if(/youtube-nocookie\.com|youtube\.com/.test(frame.src))frame.contentWindow.postMessage(JSON.stringify({event:'command',func:window.ephStoryMuted?'mute':'unMute',args:[]}),'*');
+        else if(/player\.vimeo\.com/.test(frame.src)){frame.contentWindow.postMessage(JSON.stringify({method:'setVolume',value:window.ephStoryMuted?0:1}),'*');frame.contentWindow.postMessage(JSON.stringify({method:'play'}),'*');}
       }catch(e){}
     }
   }
@@ -5520,12 +5935,11 @@ document.addEventListener('click', function(event) {
   var baseStoryMarkup=window.ephPublicStoryMarkup;
   if(typeof baseStoryMarkup==='function'&&!baseStoryMarkup.__ephMutedAutoplayFinal){
     var storyWrapped=function(){
-      window.ephStoryMuted=true;
       var result=baseStoryMarkup.apply(this,arguments);
       var host=storyHost();
       if(host){
         var frame=host.querySelector('iframe');if(frame)prepareIframe(frame);
-        var media=host.querySelector('video');if(media){media.muted=true;media.defaultMuted=true;media.autoplay=true;media.playsInline=true;media.preload='auto';}
+        var media=host.querySelector('video');if(media){media.muted=!!window.ephStoryMuted;media.defaultMuted=!!window.ephStoryMuted;media.autoplay=true;media.playsInline=true;media.preload='auto';}
         var sound=host.querySelector('[data-eph-story-sound]');if(sound)sound.textContent='🔇 Sound Off · tap to enable';
         setTimeout(observeStory,80);
       }
@@ -5552,3 +5966,172 @@ document.addEventListener('click', function(event) {
   setTimeout(observeStory,300);
 })();
 </script>
+
+<script id="eph-crm-files-to-spa-tenancy-reminder-v2">
+(function(){
+ 'use strict';
+ if(window.__ephCrmFilesToAgreementReminderV2)return;
+ window.__ephCrmFilesToAgreementReminderV2=true;
+ const txt=v=>String(v==null?'':v).trim();
+ const rows=()=>Array.isArray(window.leases)?window.leases:(typeof leases!=='undefined'?leases:[]);
+ async function findLeaseByKey(key){
+   const q=await ephRequest('/rest/v1/crm_records?select=id,kind,data,updated_at&kind=eq.lease&limit=5000');
+   const all=Array.isArray(q.data)?q.data:[];
+   return all.find(x=>txt(x.data&&x.data.sourceAttachmentKey)===txt(key))||null;
+ }
+ window.ephUpsertCrmFileReminderV2=async function(spec){
+   ephRequireAdmin();spec=spec||{};
+   const key=txt(spec.sourceAttachmentKey);if(!key)throw new Error('Missing stable file source key.');
+   const existing=await findLeaseByKey(key);
+   const hasFile=!!(txt(spec.fileName)||txt(spec.fileData)||txt(spec.fileUrl));
+   const now=new Date().toISOString();
+   if(!hasFile){
+     if(existing){
+       const old=existing.data&&typeof existing.data==='object'?existing.data:{};
+       const data={...old,documentName:'',documentData:'',documentUrl:'',status:'File Removed',fileRemovedAt:now,updated_at:now};
+       const q=await ephRequest('/rest/v1/crm_records?id=eq.'+encodeURIComponent(String(existing.id))+'&kind=eq.lease',{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({data,updated_at:now})});
+       if(!Array.isArray(q.data)||!q.data.length)throw new Error('Could not mark the linked reminder file as removed.');
+     }
+     return {ok:true,action:existing?'file-removed':'no-file',sourceAttachmentKey:key};
+   }
+   const old=existing&&existing.data&&typeof existing.data==='object'?existing.data:{};
+   const data={...old,
+     id:old.id||spec.displayId||('DOC-FILE-'+key.replace(/[^A-Za-z0-9_-]/g,'-')),
+     ref:txt(spec.ref)||txt(old.ref),person:txt(spec.person)||txt(old.person),property:txt(spec.property)||txt(old.property),
+     kind:txt(spec.kind)||txt(old.kind)||'SPA',kindLabel:txt(spec.kind)||txt(old.kindLabel)||'SPA',
+     status:(old.status&&old.status!=='File Removed')?old.status:(txt(spec.status)||'Pending Review'),
+     date:txt(spec.date)||txt(old.date),leaseStart:txt(spec.date)||txt(old.leaseStart),leaseEnd:txt(spec.leaseEnd)||txt(old.leaseEnd),
+     remindDays:Number(spec.remindDays||old.remindDays||30),nextFollowUpDate:txt(spec.nextFollowUpDate)||txt(old.nextFollowUpDate),
+     documentName:txt(spec.fileName)||txt(old.documentName),documentData:'',documentUrl:txt(spec.fileUrl)||txt(old.documentUrl),
+     sourceAttachmentKey:key,sourceCrmTable:txt(spec.sourceCrmTable),sourceCrmKind:txt(spec.sourceCrmKind),sourceCrmDbId:txt(spec.sourceCrmDbId),sourceCrmCode:txt(spec.sourceCrmCode),
+     sourceFileField:txt(spec.sourceFileField),sourceFileNameField:txt(spec.sourceFileNameField),fileManagedByCRM:true,
+     attachmentType:'CRM file attachment',remark:txt(spec.remark)||txt(old.remark),created_at:old.created_at||now,updated_at:now
+   };
+   let saved;
+   if(existing){
+     saved=await ephRequest('/rest/v1/crm_records?id=eq.'+encodeURIComponent(String(existing.id))+'&kind=eq.lease',{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({data,updated_at:now})});
+   }else{
+     saved=await ephRequest('/rest/v1/crm_records',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({id:ephNewDbRecordId('lease'),kind:'lease',data,updated_at:now})});
+   }
+   if(!Array.isArray(saved.data)||!saved.data.length)throw new Error('Google Sheets did not confirm the SPA / Tenancy Reminder file link.');
+   return {ok:true,action:existing?'updated':'created',id:String(saved.data[0].id),sourceAttachmentKey:key};
+ };
+ window.ephSyncLeadAgreementFileV2=async function(x){
+   x=x||{};const dbId=txt(x.dbId);const code=txt(x.code);if(!dbId)throw new Error('Customer Lead database ID is missing.');
+   return window.ephUpsertCrmFileReminderV2({
+     sourceAttachmentKey:'CRMFILE:LEAD:'+dbId+':contractFile',sourceCrmTable:'crm_leads',sourceCrmKind:'lead',sourceCrmDbId:dbId,sourceCrmCode:code,
+     sourceFileField:'contractFileData',sourceFileNameField:'contractFileName',ref:code,person:x.name,property:x.property,
+     kind:String(x.type||'Buyer').toLowerCase()==='tenant'?'Tenancy Agreement':'SPA',status:x.status||'Pending Review',date:x.date,leaseEnd:x.leaseEnd,nextFollowUpDate:x.nextFollowUpDate,
+     fileName:x.fileName,fileData:x.fileData,fileUrl:x.fileUrl,remark:x.remark||'File linked automatically from Customer Leads. Confirm signing / expiry dates in Agreement Tracker.'
+   });
+ };
+ window.ephMarkCrmFileReminderRemovedV2=async function(key){return window.ephUpsertCrmFileReminderV2({sourceAttachmentKey:key,fileName:'',fileData:'',fileUrl:''});};
+ function hydrate(){
+   const arr=rows();
+   for(const lease of arr){
+     const key=txt(lease.sourceAttachmentKey);let source=null;
+     if(lease.sourceCrmTable==='crm_leads'){
+       const src=(typeof leads!=='undefined'?leads:[]);source=src.find(x=>String(x._dbid||'')===String(lease.sourceCrmDbId||''))||src.find(x=>txt(x.displayCode||x.id)===txt(lease.sourceCrmCode||lease.ref));
+     }else if(lease.sourceCrmTable==='crm_records'){
+       const src=(typeof agents!=='undefined'?agents:[]);source=src.find(x=>txt(x.displayCode||x.id)===txt(lease.sourceCrmCode||lease.agentRef||lease.ref));
+     }
+     // Backward compatibility for Agent profile tracker rows created before this patch.
+     if(!source&&lease.agentProfileTracker){const src=(typeof agents!=='undefined'?agents:[]);source=src.find(x=>txt(x.displayCode||x.id)===txt(lease.agentCode||lease.agentRef||lease.ref));if(source){lease.sourceFileField='contractFileData';lease.sourceFileNameField='contractFileName';}}
+     if(source){
+       const dataKey=txt(lease.sourceFileField),nameKey=txt(lease.sourceFileNameField);
+       if(dataKey&&source[dataKey]){lease.documentData=source[dataKey];if(!lease.documentUrl)lease.documentUrl=source[dataKey];lease.file=source[dataKey];}
+       if(nameKey&&source[nameKey])lease.documentName=source[nameKey];
+       const urlKey=dataKey==='agentFileData'?'agentFileUrl':'contractDocumentUrl';
+       if(!lease.documentUrl&&source[urlKey])lease.documentUrl=source[urlKey];
+     }
+   }
+ }
+ const priorLoad=window.loadCRMData;
+ if(typeof priorLoad==='function'){
+   window.loadCRMData=async function(){await priorLoad.apply(this,arguments);try{hydrate();if(typeof render==='function')render();}catch(e){console.warn('SPA / Tenancy file hydration skipped:',e);}};
+ }
+ window.ephHydrateAgreementReminderFilesV2=hydrate;
+})();
+</script>
+
+<script id="eph-story-global-mute-final-guard-v6">
+(function(){
+  'use strict';
+  if(window.__ephStoryGlobalMuteFinalV6)return;
+  window.__ephStoryGlobalMuteFinalV6=true;
+  try{
+    var saved=localStorage.getItem('ephStoryMuted');
+    if(typeof window.ephStoryMuted!=='boolean')window.ephStoryMuted=saved===null?true:saved==='1';
+  }catch(e){if(typeof window.ephStoryMuted!=='boolean')window.ephStoryMuted=true;}
+
+  function host(){return document.getElementById('ephPublicStoryPlayer');}
+  function label(){
+    var h=host(),b=document.getElementById('eph-story-global-sound');if(!b)return;
+    var muted=!!window.ephStoryMuted,drive=!!(h&&h.querySelector('iframe.eph-drive-video-preview'));
+    var nextText=(muted?'🔇 Story 全部静音中 · 点击开启声音':'🔊 Story 声音已开启 · 点击全部静音')+(drive?'（Drive Preview 请用播放器内喇叭）':'');
+    if(b.textContent!==nextText)b.textContent=nextText;
+    if(b.getAttribute('aria-pressed')!==(muted?'true':'false'))b.setAttribute('aria-pressed',muted?'true':'false');
+    var nextTitle=drive?'Google Drive Preview 无法由外部网页按钮控制音量。':'一次切换当前影片及后续 Story 的声音。';
+    if(b.title!==nextTitle)b.title=nextTitle;
+  }
+  function apply(){
+    var h=host();if(!h)return;
+    var muted=!!window.ephStoryMuted;
+    h.querySelectorAll('video').forEach(function(v){
+      v.defaultMuted=muted;v.muted=muted;
+      if(!muted&&v.paused){var p=v.play();if(p&&p.catch)p.catch(function(){});}
+      if(v.dataset.ephMuteApplyV6!=='1'){
+        v.dataset.ephMuteApplyV6='1';
+        ['loadedmetadata','loadeddata','canplay','play'].forEach(function(ev){v.addEventListener(ev,function(){v.defaultMuted=!!window.ephStoryMuted;v.muted=!!window.ephStoryMuted;},{passive:true});});
+      }
+    });
+    var yt=window.__ephStoryYouTubePlayer;
+    try{if(yt){if(muted&&yt.mute)yt.mute();if(!muted&&yt.unMute)yt.unMute();}}catch(e){}
+    var vm=window.__ephStoryVimeoPlayer;
+    try{if(vm&&vm.setMuted){var q=vm.setMuted(muted);if(q&&q.catch)q.catch(function(){});}}catch(e){}
+    var frame=h.querySelector('iframe');
+    if(frame){
+      try{
+        var u=new URL(frame.src,location.href);
+        if(/youtube-nocookie\.com|youtube\.com/.test(u.hostname)&&!yt){frame.contentWindow.postMessage(JSON.stringify({event:'command',func:muted?'mute':'unMute',args:[]}), '*');}
+        else if(/player\.vimeo\.com/.test(u.hostname)&&!vm){frame.contentWindow.postMessage(JSON.stringify({method:'setMuted',value:muted}), '*');frame.contentWindow.postMessage(JSON.stringify({method:'setVolume',value:muted?0:1}), '*');}
+      }catch(e){}
+    }
+    label();
+  }
+  window.ephApplyStoryGlobalMuteV6=apply;
+  var originalSet=window.ephSetPublicStorySound;
+  window.ephSetPublicStorySound=function(muted){
+    window.ephStoryMuted=!!muted;
+    try{localStorage.setItem('ephStoryMuted',window.ephStoryMuted?'1':'0');}catch(e){}
+    try{if(typeof originalSet==='function')originalSet.call(this,window.ephStoryMuted);}catch(e){}
+    apply();
+    requestAnimationFrame(apply);setTimeout(apply,180);setTimeout(apply,700);
+  };
+
+  function ensureButton(){
+    var h=host();if(!h||!h.parentNode)return;
+    var b=document.getElementById('eph-story-global-sound');
+    if(!b){
+      b=document.createElement('button');b.type='button';b.id='eph-story-global-sound';b.className='btn gold small';
+      b.style.cssText='display:inline-flex;align-items:center;justify-content:center;margin:0 0 10px 0;min-height:44px;padding:10px 15px;font-weight:800;';
+      h.parentNode.insertBefore(b,h);
+    }else if(b.parentNode!==h.parentNode||b.nextElementSibling!==h){
+      h.parentNode.insertBefore(b,h);
+    }
+    // Assign a single DOM click handler. Reassigning onclick replaces the prior
+    // handler, so repeated Story renders can never stack multiple toggles.
+    b.dataset.ephMuteV6Bound='1';
+    b.onclick=function(ev){if(ev){ev.preventDefault();ev.stopPropagation();}window.ephSetPublicStorySound(!window.ephStoryMuted);};
+    label();
+  }
+  var pending=false;
+  function refresh(){if(pending)return;pending=true;requestAnimationFrame(function(){pending=false;ensureButton();apply();});}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',refresh,{once:true});else refresh();
+  var mo=new MutationObserver(refresh);
+  mo.observe(document.documentElement,{childList:true,subtree:true});
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')setTimeout(refresh,120);});
+  window.addEventListener('pageshow',function(){setTimeout(refresh,120);});
+})();
+</script>
+
